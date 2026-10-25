@@ -1,21 +1,3 @@
----
-language:
-  - en
-  - ru
-license: other
-task_categories:
-  - text-generation
-tags:
-  - corpus
-  - bilingual
-  - pretraining
-  - science
-  - mathematics
-pretty_name: KronCorpus
-size_categories:
-  - 1B<n<10B
----
-
 # KronCorpus
 
 **A 2B-token bilingual English–Russian pretraining corpus with a science accent.**
