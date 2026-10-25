@@ -1,0 +1,13 @@
+# data
+data/bilingual/shards/
+data/bilingual/mix/
+data/bilingual/heldout/
+data/bilingual/raw/
+data/bilingual/bin/
+data/bilingual/*.jsonl.gz
+data/bilingual/pg_catalog.csv
+
+# python
+__pycache__/
+*.pyc
+.venv/
