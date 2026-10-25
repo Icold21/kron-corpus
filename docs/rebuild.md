@@ -3,7 +3,12 @@
 The build is deterministic given the same shards: deduplication walks documents
 in SHA-256 order, and the mixer walks each bucket in the same order.
 
+The repository is self-contained: `kronllm/` is a snapshot of the package from
+[kron-llm](https://github.com/Icold21/kron-llm) at the same commit, so the
+pipeline runs without cloning a second repository.
+
 ```bash
+pip install -e .                     # the kronllm package in this repo
 pip install -r requirements.txt      # tokenizers, datasets, numpy, tqdm, pandas
 
 # 1. Primary sources through Hugging Face (~5.5 GB of text)
