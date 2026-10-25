@@ -1,8 +1,26 @@
+---
+language:
+  - en
+  - ru
+license: other
+task_categories:
+  - text-generation
+tags:
+  - corpus
+  - bilingual
+  - pretraining
+  - science
+  - mathematics
+pretty_name: KronCorpus
+size_categories:
+  - 1B<n<10B
+---
+
 # KronCorpus
 
 **A 2B-token bilingual English–Russian pretraining corpus with a science accent.**
 
-KronCorpus is the training corpus behind [KronLLM](https://github.com/Icold21/kron_llm),
+KronCorpus is the training corpus behind [KronLLM](https://github.com/Icold21/kron-llm),
 a compact language model whose weights are Kronecker products. It is published
 separately because the data is useful on its own: a small, fully documented,
 science-heavy bilingual corpus for anyone training a model in the 10M–100M

@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kronllm.bilingual import append_jsonl, normalize, record_shard
 
 API = "https://rickandmorty.fandom.com/api.php"
-UA = {"User-Agent": "KronLLM-research/0.1 (corpus; github.com/Icold21/kron_llm)"}
+UA = {"User-Agent": "KronLLM-research/0.1 (corpus; github.com/Icold21/kron-llm)"}
 ROOT = Path("data/bilingual")
 SHARDS = ROOT / "shards"
 MANIFEST = ROOT / "manifest.jsonl"

@@ -43,7 +43,7 @@ from kronllm.bilingual import (DOMAIN_QUOTAS, append_jsonl, clean_wikitext,
 from kronllm.bilingual import Shard
 
 UA = {"User-Agent": "KronLLM-research/0.1 (bilingual corpus pilot; "
-                    "https://github.com/Icold21/kron_llm)"}
+                    "https://github.com/Icold21/kron-llm)"}
 ROOT = Path("data/bilingual")
 RAW = ROOT / "raw"
 SHARDS = ROOT / "shards"
