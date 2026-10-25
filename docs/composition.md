@@ -27,7 +27,7 @@ tokens before dedup and quota selection.
 | logic | 2 % | Lean mathlib proofs + Wikipedia logic |
 | CS / engineering | 3 % | curated Wikipedia categories (chips, VLSI, XP, agile) |
 | humour | <1 % | Gutenberg satire, transcripts |
-| identity | <0.1 % | synthetic |
+| identity | <0.1 % | synthetic, 800 plain + 850 pastiche per language, no numeric facts |
 
 ## Language ratio
 

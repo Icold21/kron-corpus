@@ -61,7 +61,7 @@ sources actually yielded before the final mix.
 | encyclopedic | 9 % | 17 % | Wikipedia EN/RU |
 | CS / software engineering / engineering | 3 % | 3 % | Wikipedia (curated categories: microprocessors, VLSI, XP, agile) |
 | humour / satire | 1 % | <1 % | Project Gutenberg, Fandom transcripts |
-| self-identity | 1 % | <0.1 % | synthetic, prompt-constrained |
+| self-identity | 1 % | <0.1 % | synthetic: 800 plain + 850 pastiche per language, no numeric facts |
 
 The table is honest about the two hard domains: **logic and ML are short**.
 Logic text at scale barely exists outside formal-proof repositories, and ML
@@ -110,14 +110,14 @@ The tokenised bins (uint16, ~4 GB) are distributed outside git — GitHub is not
 a data host.
 
 ```python
-# Kaggle (private dataset, mount and read the memmap)
+# Kaggle (private dataset with the tokenised bins, uploaded after the build)
 #   kaggle datasets download -d icold21/kron-corpus-2b
 import numpy as np
 tokens = np.memmap("train.bpe.bin", dtype=np.uint16, mode="r")
 
-# Hugging Face (once published)
+# Hugging Face (card, manifest, identity slice, easter eggs — no bins)
 #   from datasets import load_dataset
-#   ds = load_dataset("Icold21/kron-corpus-2b")
+#   ds = load_dataset("Icold/kron-corpus")
 ```
 
 The raw, deduplicated text shards and the exact mix are reproducible from this
@@ -153,6 +153,7 @@ attribution.
 ---
 
 <sub>Two slices in `data/easter_eggs/` and `data/identity/` are easter eggs: a
-synthetic self-identity set where the model calls itself *Kron*, and 1.8 MB of
-animated sci-fi dialogue. Both are under 0.1 % of the corpus and marked in the
+synthetic self-identity set where the model calls itself *Kron* (800 plain +
+850 pastiche per language), and 2 MB of animated sci-fi dialogue (81 episode
+transcripts plus 11 season-9 plot summaries). Both are under 0.1 % of the corpus and marked in the
 manifest.</sub>
