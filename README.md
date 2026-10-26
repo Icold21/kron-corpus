@@ -1,6 +1,6 @@
 # KronCorpus
 
-**A 2B-token bilingual English–Russian pretraining corpus with a science accent.**
+**A bilingual English–Russian pretraining corpus with a science accent.**
 
 KronCorpus is the training corpus behind [KronLLM](https://github.com/Icold21/kron-llm),
 a compact language model whose weights are Kronecker products. It is published
@@ -14,36 +14,39 @@ parameter range.
 
 | property | value |
 |---|---|
-| tokens | **~2.0B** (target; fetched text ≈ 7.3 GB at 3.4 bytes/token) |
-| languages | **60 / 40 EN / RU by bytes** — stated in bytes on purpose, see below |
-| documents | ~790k, deduplicated (MinHash, Jaccard 0.8) |
+| tokens | **1.637B train tokens** (8K BPE, 3.11 bytes/token; 7.65 GB of fetched text) |
+| languages | **EN 70.8 % / RU 29.2 % of bytes**, which is **EN 84.3 % / RU 15.7 % of tokens** |
+| documents | 787,004 after dedup (MinHash, Jaccard 0.8; 20,022 dropped) |
 | tokenizer | 8K byte-level BPE, bilingual, trained on the mix |
 | held-out | 2 % per language, disjoint by document |
 | provenance | source, licence, URL and SHA-256 for **every** shard in `manifest.jsonl` |
 
-**Why bytes and not tokens.** Cyrillic costs two UTF-8 bytes per character, so
-a 40 % Russian share by bytes is roughly a third of the tokens. We fix the
-contract in bytes because it is the only quantity that does not depend on the
-tokenizer; the token share is reported next to it, and the tokenizer's
-fertility per language is measured in `tokenizer_meta.json`.
+**Why bytes and not tokens.** The quota is fixed in bytes because that is the
+only quantity that does not depend on the tokenizer, and the token share is
+measured and published next to it. The measurement is blunt: Russian costs
+**5.30 bytes/token** against **2.67** for English, so a 29 % Russian byte share
+is only **15.7 % of the tokens**. That is less than half the ~33 % an earlier
+pilot extrapolated from a truncated measurement. Rebalancing (upsampling
+Russian or trimming English) is a decision for the SFT stage; the pretraining
+run uses the corpus as measured.
 
 ## Composition
 
-Domain quotas are the design contract; the "fetched" column is what the
-sources actually yielded before the final mix.
+Domain quotas are the design contract; the "measured" column is the actual mix
+after dedup, as a share of all documents.
 
-| domain | quota | fetched | main sources |
+| domain | quota | measured | main sources |
 |---|---:|---:|---|
-| mathematics | 25 % | 26 % | OpenWebMath, Wikipedia math |
-| science (physics, astronomy, cosmology) | 14 % | 22 % | arXiv, Wikipedia, curated cosmology articles |
-| code | 15 % | 14 % | CodeParrot Clean, CPython stdlib |
-| machine learning | 12 % | 5 % | arXiv cs.LG/CS.CL abstracts, textbooks, framework docs |
-| literature | 11 % | 13 % | Project Gutenberg, Wikisource, FineWeb-2 |
-| logic | 10 % | 3 % | Wikipedia logic, Lean 4 mathlib proofs |
-| encyclopedic | 9 % | 17 % | Wikipedia EN/RU |
-| CS / software engineering / engineering | 3 % | 3 % | Wikipedia (curated categories: microprocessors, VLSI, XP, agile) |
-| humour / satire | 1 % | <1 % | Project Gutenberg, Fandom transcripts |
-| self-identity | 1 % | <0.1 % | synthetic: 800 plain + 850 pastiche per language, no numeric facts |
+| mathematics | 25 % | 25.3 % | OpenWebMath, Wikipedia math |
+| science (physics, astronomy, cosmology) | 14 % | 21.6 % | arXiv, Wikipedia, curated cosmology articles |
+| code | 15 % | 14.0 % | CodeParrot Clean, CPython stdlib |
+| machine learning | 12 % | 5.2 % | arXiv cs.LG/CS.CL abstracts, textbooks, framework docs |
+| literature | 11 % | 12.2 % | Project Gutenberg, Wikisource, FineWeb-2 |
+| logic | 10 % | 3.9 % | Wikipedia logic, Lean 4 mathlib proofs |
+| encyclopedic | 9 % | 16.4 % | Wikipedia EN/RU |
+| CS / software engineering / engineering | 3 % | 1.2 % | Wikipedia (curated categories: microprocessors, VLSI, XP, agile) |
+| humour / satire | 1 % | 0.2 % | Project Gutenberg, Fandom transcripts |
+| self-identity | 1 % | 0.09 % | synthetic: 800 plain + 850 pastiche per language, no numeric facts |
 
 The table is honest about the two hard domains: **logic and ML are short**.
 Logic text at scale barely exists outside formal-proof repositories, and ML
@@ -88,7 +91,7 @@ shortfalls instead of padding them with mislabelled text.
 
 ## Loading
 
-The tokenised bins (uint16, ~4 GB) are distributed outside git — GitHub is not
+The tokenised bins (uint16, 3.3 GB) are distributed outside git — GitHub is not
 a data host.
 
 ```python
