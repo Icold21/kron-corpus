@@ -32,9 +32,9 @@ parameter range.
 
 | property | value |
 |---|---|
-| tokens | **2,183,929,941 train tokens** (8K BPE, 3.80 bytes/token) |
+| tokens | **2,250,807,719 train tokens** (8K BPE, 3.69 bytes/token) |
 | size | **8.61 GB**, 945,234 documents |
-| languages | **EN 46.2 % / RU 53.8 % of bytes**, which is **EN 62.1 % / RU 37.9 % of tokens** |
+| languages | **EN 46.2 % / RU 53.8 % of bytes**, which is **EN 61.9 % / RU 38.1 % of tokens** |
 | documents | 787,004 after MinHash (20,022 dropped) + 289,000 Russian bulk articles (title-deduplicated) |
 | tokenizer | 8K byte-level BPE, bilingual, trained on the mix |
 | held-out | 2 % per language, disjoint by document |
@@ -43,12 +43,12 @@ parameter range.
 **Why bytes and not tokens.** The quota is fixed in bytes because that is the
 only quantity that does not depend on the tokenizer, and the token share is
 measured and published next to it. The measurement is blunt: Russian costs
-**5.12 bytes/token** against **3.00** for English, so a byte quota is not a
+**4.96 bytes/token** against **2.92** for English, so a byte quota is not a
 token quota. The quota build gave Russian 15.7 % of the tokens at 29 % of the
 bytes; the fix was more Russian data, not a different formula. The full Russian
 Wikipedia (2.0 GB of articles) and the full Russian Wikisource (1.1 GB of
 public-domain literature) were imported with curated titles skipped, taking
-Russian to **37.9 % of tokens**.
+Russian to **38.1 % of tokens**.
 
 ## Composition
 
