@@ -32,9 +32,10 @@ parameter range.
 
 | property | value |
 |---|---|
-| tokens | **1.637B train tokens** (8K BPE, 3.11 bytes/token; 7.65 GB of fetched text) |
-| languages | **EN 70.8 % / RU 29.2 % of bytes**, which is **EN 84.3 % / RU 15.7 % of tokens** |
-| documents | 787,004 after dedup (MinHash, Jaccard 0.8; 20,022 dropped) |
+| tokens | **2,183,929,941 train tokens** (8K BPE, 3.80 bytes/token) |
+| size | **8.61 GB**, 945,234 documents |
+| languages | **EN 46.2 % / RU 53.8 % of bytes**, which is **EN 62.1 % / RU 37.9 % of tokens** |
+| documents | 787,004 after MinHash (20,022 dropped) + 289,000 Russian bulk articles (title-deduplicated) |
 | tokenizer | 8K byte-level BPE, bilingual, trained on the mix |
 | held-out | 2 % per language, disjoint by document |
 | provenance | source, licence, URL and SHA-256 for **every** shard in `manifest.jsonl` |
@@ -42,11 +43,12 @@ parameter range.
 **Why bytes and not tokens.** The quota is fixed in bytes because that is the
 only quantity that does not depend on the tokenizer, and the token share is
 measured and published next to it. The measurement is blunt: Russian costs
-**5.30 bytes/token** against **2.67** for English, so a 29 % Russian byte share
-is only **15.7 % of the tokens**. That is less than half the ~33 % an earlier
-pilot extrapolated from a truncated measurement. Rebalancing (upsampling
-Russian or trimming English) is a decision for the SFT stage; the pretraining
-run uses the corpus as measured.
+**5.12 bytes/token** against **3.00** for English, so a byte quota is not a
+token quota. The quota build gave Russian 15.7 % of the tokens at 29 % of the
+bytes; the fix was more Russian data, not a different formula. The full Russian
+Wikipedia (2.0 GB of articles) and the full Russian Wikisource (1.1 GB of
+public-domain literature) were imported with curated titles skipped, taking
+Russian to **37.9 % of tokens**.
 
 ## Composition
 
@@ -55,15 +57,15 @@ after dedup, as a share of all documents.
 
 | domain | quota | measured | main sources |
 |---|---:|---:|---|
-| mathematics | 25 % | 25.3 % | OpenWebMath, Wikipedia math |
-| science (physics, astronomy, cosmology) | 14 % | 21.6 % | arXiv, Wikipedia, curated cosmology articles |
-| code | 15 % | 14.0 % | CodeParrot Clean, CPython stdlib |
-| machine learning | 12 % | 5.2 % | arXiv cs.LG/CS.CL abstracts, textbooks, framework docs |
-| literature | 11 % | 12.2 % | Project Gutenberg, Wikisource, FineWeb-2 |
-| logic | 10 % | 3.9 % | Wikipedia logic, Lean 4 mathlib proofs |
-| encyclopedic | 9 % | 16.4 % | Wikipedia EN/RU |
-| CS / software engineering / engineering | 3 % | 1.2 % | Wikipedia (curated categories: microprocessors, VLSI, XP, agile) |
-| humour / satire | 1 % | 0.2 % | Project Gutenberg, Fandom transcripts |
+| mathematics | 25 % | 19.1 % | OpenWebMath, Wikipedia math |
+| science (physics, astronomy, cosmology) | 14 % | 11.1 % | arXiv, Wikipedia, curated cosmology articles, theoretical-physics categories |
+| code | 15 % | 7.5 % | CodeParrot Clean, CPython stdlib |
+| machine learning | 12 % | 5.4 % | arXiv cs.LG/CS.CL abstracts, Cosmopedia, framework docs |
+| literature | 11 % | 21.2 % | Project Gutenberg, Wikisource (1.1 GB Russian), FineWeb-2 |
+| logic | 10 % | 3.2 % | Wikipedia logic, Lean 4 mathlib proofs |
+| encyclopedic | 9 % | 30.3 % | Wikipedia EN/RU, full Russian Wikipedia import |
+| CS / software engineering / engineering | 3 % | 2.3 % | IETF RFCs, Wikipedia (microprocessors, VLSI, XP, agile) |
+| humour / satire | 1 % | <0.1 % | Project Gutenberg, Fandom transcripts |
 | self-identity | 1 % | 0.09 % | synthetic: 800 plain + 850 pastiche per language, no numeric facts |
 
 The table is honest about the two hard domains: **logic and ML are short**.
@@ -109,7 +111,7 @@ shortfalls instead of padding them with mislabelled text.
 
 ## Loading
 
-The tokenised bins (uint16, 3.3 GB) are distributed outside git — GitHub is not
+The tokenised bins (uint16, 4.4 GB) are distributed outside git — GitHub is not
 a data host.
 
 ```python
