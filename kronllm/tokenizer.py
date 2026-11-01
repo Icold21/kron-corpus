@@ -20,9 +20,10 @@ become single ids while rare byte triples stay split.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
-from typing import Any, List, Mapping, Sequence
+from typing import Any, List, Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -53,6 +54,19 @@ class ByteTokenizer:
 # ---------------------------------------------------------------------------
 # byte-level BPE
 # ---------------------------------------------------------------------------
+#: The five reserved ids at the top of the 8K vocabulary, in the order
+#: ``prepare_bilingual_bin.py`` writes them.  ``BPETokenizer.eot_id`` is the
+#: *document* separator (8191, "<|endoftext|>"), which is not the end of a chat
+#: turn: a turn ends with ``TURN_EOT_ID`` (8190, "<|eot|>").  Passing the former
+#: where the latter is meant makes generation run straight through the end of
+#: the answer and into the next turn, which looks like a model defect and is not.
+SYSTEM_ID = 8187
+USER_ID = 8188
+ASSISTANT_ID = 8189
+TURN_EOT_ID = 8190
+DOC_EOT_ID = 8191
+
+
 class BPETokenizer:
     name = "bpe"
 
@@ -82,6 +96,37 @@ class BPETokenizer:
             return ""
         return self._tok.decode(clean, skip_special_tokens=False)
 
+    def byte_lengths(self) -> np.ndarray:
+        """Bytes of UTF-8 text behind every token id (0 for special tokens).
+
+        The validation loss is a mean over tokens, but the honest denominator is
+        bytes, and the ratio differs per domain: code runs at 2.6 bytes/token,
+        Russian at 5.0.  A single corpus-wide constant therefore reports the
+        wrong number for any slice (for Q10 it was 3.694 against 2.558 on the
+        span the trainer actually measured).  This table turns bytes per batch
+        into a lookup: ``sum(byte_len[targets])`` is exact, because a byte-level
+        BPE token always decodes to the same byte string.
+        """
+        table = np.zeros(self.vocab_size, dtype=np.int32)
+        if not hasattr(self._tok, "id_to_token"):
+            return table
+        mapping = _byte_decoder()
+        for idx in range(self.vocab_size):
+            piece = self._tok.id_to_token(idx)
+            if not piece:
+                continue
+            if piece.startswith("<|") and piece.endswith("|>"):
+                # Chat/EOT specials are markers, not text: counting their
+                # characters as bytes would inflate the denominator.
+                continue
+            try:
+                raw = bytes(mapping[ch] for ch in piece)
+            except KeyError:
+                # Special tokens (<|user|>, ...) are not text.
+                continue
+            table[idx] = len(raw)
+        return table
+
     def __repr__(self) -> str:
         return (f"BPETokenizer(vocab={self.vocab_size}, "
                 f"{self.bytes_per_token:.2f} bytes/token)")
@@ -107,7 +152,15 @@ def load_tokenizer(cfg: Mapping[str, Any]):
         raise FileNotFoundError(
             f"{path} missing -- run `python scripts/prepare_bpe.py` first")
     meta = json.loads(path.read_text(encoding="utf-8"))
-    return BPETokenizer(meta["tokenizer"], meta["vocab_size"],
+    tok_path = Path(str(meta["tokenizer"]))
+    if not tok_path.exists():
+        # The meta may carry the build machine's path (data/bilingual/...).  On
+        # Kaggle the bins and the tokenizer sit together in /kaggle/input/<ds>,
+        # so fall back to the file next to the meta.
+        candidate = Path(dc.get("data_dir", "data")) / tok_path.name
+        if candidate.exists():
+            tok_path = candidate
+    return BPETokenizer(tok_path, meta["vocab_size"],
                         meta["bytes_per_token"], meta["eot_id"])
 
 
@@ -120,6 +173,26 @@ def bits_per_byte(loss_nats: float, bytes_per_token: float) -> float:
     import math
 
     return float(loss_nats) / max(float(bytes_per_token), 1e-9) / math.log(2.0)
+
+
+def _byte_decoder() -> dict[str, int]:
+    """The inverse of the GPT-2 byte-level alphabet used by ByteLevel.
+
+    ``ByteLevel`` maps each raw byte to a printable character (``Ġ`` for space,
+    ``Ċ`` for newline, ...).  To recover the byte length of a token, its string
+    has to be mapped back through exactly this table.
+    """
+    printable = (list(range(ord("!"), ord("~") + 1))
+                 + list(range(ord("¡"), ord("¬") + 1))
+                 + list(range(ord("®"), ord("ÿ") + 1)))
+    codes = printable[:]
+    extra = 0
+    for byte in range(256):
+        if byte not in printable:
+            printable.append(byte)
+            codes.append(256 + extra)
+            extra += 1
+    return {chr(code): byte for byte, code in zip(printable, codes)}
 
 
 # ---------------------------------------------------------------------------
@@ -139,11 +212,20 @@ def train_bpe_merges(texts, vocab_size: int, out_path: str | Path,
     template (``<|user|>``, ``<|assistant|>``) lives here so fine-tuning and
     inference share one encoding.
     """
-    from tokenizers import Tokenizer, decoders, models, pre_tokenizers, trainers
+    from tokenizers import (Regex, Tokenizer, decoders, models,
+                         pre_tokenizers, trainers)
 
     tok = Tokenizer(models.BPE(unk_token=None))
-    tok.pre_tokenizer = pre_tokenizers.ByteLevel(add_prefix_space=False,
-                                                 use_regex=True)
+    # Split on digits *before* ByteLevel so every digit becomes its own token
+    # (addition needs to align units, tens, hundreds; "2026" as one token makes
+    # that impossible).  Splitting after ByteLevel destroys multibyte scripts:
+    # it cut UTF-8 sequences and Russian fell back to 2.72 bytes/token.  This
+    # order keeps Cyrillic intact (5.99 bytes/token on the validation sample)
+    # and costs ~1 % fertility on English.
+    tok.pre_tokenizer = pre_tokenizers.Sequence([
+        pre_tokenizers.Split(Regex(r"\d"), behavior="isolated"),
+        pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=True),
+    ])
     tok.decoder = decoders.ByteLevel()
     trainer = trainers.BpeTrainer(
         vocab_size=int(vocab_size),
@@ -174,24 +256,105 @@ def encode_corpus(stories: Sequence[bytes], tok: BPETokenizer,
                   chunk: int = 2000) -> dict:
     """Encode stories into a ``uint16`` memmap; returns byte/token stats.
 
-    Works in chunks and keeps the token ids as ``uint16`` numpy arrays, so peak
-    memory stays around ``2 * n_tokens`` bytes (~120 MB for TinyStories-200K).
+    Writes each chunk straight to disk instead of accumulating every token
+    array in memory.  At 2.5B tokens the old version held the whole corpus plus
+    a second concatenation buffer (~10 GB); this one keeps peak memory at one
+    chunk, which matters when the mix is 8 GB of text.
     """
     n_bytes = 0
-    pieces: List[np.ndarray] = []
-    for start in range(0, len(stories), chunk):
-        batch = stories[start:start + chunk]
-        n_bytes += sum(len(s) for s in batch)
-        texts = [s.decode("utf-8", errors="replace") for s in batch]
-        for seq in tok.encode_batch(texts):
-            arr = np.empty(len(seq) + 1, dtype=np.uint16)
-            arr[:-1] = np.asarray(seq, dtype=np.uint16)
-            arr[-1] = eot_id
-            pieces.append(arr)
-    flat = np.concatenate(pieces) if pieces else np.zeros(0, np.uint16)
+    n_tokens = 0
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    flat.tofile(out_path)
-    n_tokens = len(flat)
+    with open(out_path, "wb") as fh:
+        for start in range(0, len(stories), chunk):
+            batch = stories[start:start + chunk]
+            n_bytes += sum(len(s) for s in batch)
+            texts = [s.decode("utf-8", errors="replace") for s in batch]
+            for seq in tok.encode_batch(texts):
+                arr = np.empty(len(seq) + 1, dtype=np.uint16)
+                arr[:-1] = np.asarray(seq, dtype=np.uint16)
+                arr[-1] = eot_id
+                arr.tofile(fh)
+                n_tokens += len(arr)
     return {"bytes": int(n_bytes), "tokens": int(n_tokens),
+            "bytes_per_token": float(n_bytes) / max(1, n_tokens)}
+
+
+def doc_hash(tokens: np.ndarray) -> int:
+    """Stable 64-bit hash of one document's token span.
+
+    The seen-set is built from the bin (token ids are all it has) and matched
+    when the *next* bin is encoded, where the same document is encoded with the
+    same tokenizer, so hashing tokens -- not text -- is the right key: no
+    decoding of 600M tokens is needed anywhere.
+    """
+    return int.from_bytes(hashlib.blake2b(np.asarray(tokens, dtype=np.uint16).tobytes(),
+                                         digest_size=8).digest(), "little")
+
+
+def encode_docs(docs: Sequence[dict], tok: BPETokenizer,
+                out_path: str | Path, eot_id: int,
+                chunk: int = 2000, max_bytes: int = 0,
+                skip_hashes: Optional[set[int]] = None,
+                target_tokens: int = 0,
+                index_path: str | Path | None = None) -> dict:
+    """Encode document dicts without materialising the whole corpus as bytes.
+
+    ``encode_corpus`` expects a list of byte strings; at 8 GB of text that list
+    is another 8 GB of RAM.  This variant reads ``doc['text']`` chunk by chunk,
+    so peak memory stays at the document store plus one chunk.
+
+    ``skip_hashes`` drops documents a previous run already trained on (see
+    ``scripts/seen_from_index.py``), ``target_tokens`` stops once the bin holds
+    that many tokens -- together they let a rebuild over-draw the mix and still
+    end with exactly one fresh pass.  ``index_path`` records, for every document
+    that landed in the bin, its token span and hash, which is what makes the
+    seen-set computable for the next session without rescanning 5.6 GB.
+    """
+    n_bytes = 0
+    n_tokens = 0
+    used = 0
+    skipped = 0
+    index: list[tuple[int, int, int]] = []
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "wb") as fh:
+        for start in range(0, len(docs), chunk):
+            batch = docs[start:start + chunk]
+            texts = []
+            sizes = []
+            for doc in batch:
+                text = doc["text"]
+                data = text.encode("utf-8")
+                if max_bytes and used + len(data) > max_bytes:
+                    break
+                texts.append(text)
+                sizes.append(len(data))
+                used += len(data)
+                n_bytes += len(data)
+            if not texts:
+                break
+            for size, seq in zip(sizes, tok.encode_batch(texts)):
+                arr = np.empty(len(seq) + 1, dtype=np.uint16)
+                arr[:-1] = np.asarray(seq, dtype=np.uint16)
+                arr[-1] = eot_id
+                h = doc_hash(arr)
+                if skip_hashes and h in skip_hashes:
+                    skipped += 1
+                    n_bytes -= size
+                    continue
+                arr.tofile(fh)
+                index.append((n_tokens, len(arr), h))
+                n_tokens += len(arr)
+                if target_tokens and n_tokens >= target_tokens:
+                    break
+            if (max_bytes and used >= max_bytes) or \
+                    (target_tokens and n_tokens >= target_tokens):
+                break
+    if index_path:
+        np.save(Path(index_path),
+                np.array(index, dtype=[("start", "<i8"), ("n", "<i4"),
+                                       ("h", "<u8")]))
+    return {"bytes": int(n_bytes), "tokens": int(n_tokens),
+            "documents": int(len(index)), "skipped": int(skipped),
             "bytes_per_token": float(n_bytes) / max(1, n_tokens)}

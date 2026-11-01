@@ -1,146 +1,166 @@
 # KronCorpus
 
-**A bilingual English–Russian pretraining corpus with a science accent.**
-
-KronCorpus is the training corpus behind [KronLLM](https://github.com/Icold21/kron-llm),
-a compact language model whose weights are Kronecker products. It is published
-separately because the data is useful on its own: a small, fully documented,
-science-heavy bilingual corpus for anyone training a model in the 10M–100M
-parameter range.
-
----
+**The bilingual English/Russian pretraining corpus of KronLLM Q10** — the
+10M-parameter model this project ships (9,938,886 parameters, Kronecker-factorised
+weights). It is published separately because the data is useful on its own: a
+small, fully documented, science-heavy bilingual corpus with a per-language
+quota contract and a provenance record for every shard.
 
 ## What is in it
 
 | property | value |
 |---|---|
-| tokens | **2,250,807,719 train tokens** (8K BPE, 3.69 bytes/token) |
-| size | **8.61 GB**, 945,234 documents |
-| languages | **EN 46.2 % / RU 53.8 % of bytes**, which is **EN 61.9 % / RU 38.1 % of tokens** |
-| documents | 787,004 after MinHash (20,022 dropped) + 289,000 Russian bulk articles (title-deduplicated) |
-| tokenizer | 8K byte-level BPE, bilingual, trained on the mix |
-| held-out | 2 % per language, disjoint by document |
+| tokens | **2,783,383,150** train tokens (8K byte-level BPE, **3.60 bytes/token**) |
+| text | **10.02 GB**, 933,522 documents (EN 517,973 / RU 415,549) |
+| languages | **EN 59.7 % / RU 40.3 % of tokens** — EN 46.5 % / RU 53.5 % of bytes |
+| held-out | 46,197,636 tokens, sha256 `a45bbb03…`, **byte-identical since v3** |
+| system prompts | **none inserted** (the 46,820 `<|system|>` ids are chat documents' own markup) |
+| bins | uint16 (`train.bpe.bin`, `val.bpe.bin`), one epoch = 169,884 steps of 16,384 tokens |
+| index | `train_index.npy`: span + token hash per document, for resumable training |
 | provenance | source, licence, URL and SHA-256 for **every** shard in `manifest.jsonl` |
 
-**Why bytes and not tokens.** The quota is fixed in bytes because that is the
-only quantity that does not depend on the tokenizer, and the token share is
-measured and published next to it. The measurement is blunt: Russian costs
-**4.96 bytes/token** against **2.92** for English, so a byte quota is not a
-token quota. The quota build gave Russian 15.7 % of the tokens at 29 % of the
-bytes; the fix was more Russian data, not a different formula. The full Russian
-Wikipedia (2.0 GB of articles) and the full Russian Wikisource (1.1 GB of
-public-domain literature) were imported with curated titles skipped, taking
-Russian to **38.1 % of tokens**.
+**Why bytes and not tokens.** The quota is stated in bytes because that is the
+only quantity independent of the tokenizer, and the token share is measured and
+published next to it. Russian costs **4.96 bytes/token** against **2.92** for
+English, so a byte quota is not a token quota: at 53.5 % of the bytes, Russian is
+40.3 % of the tokens. The 60/40 target is therefore enforced **per language**
+(`QUOTAS_EN` / `QUOTAS_RU` in `kronllm/bilingual.py`), not on one shared table.
 
 ## Composition
 
-Domain quotas are the design contract; the "measured" column is the actual mix
-after dedup, as a share of all documents.
+Quotas are per language; "realised" is what the mixer actually selected after
+dedup. ⚠ marks a domain where the supply cannot fill the quota.
 
-| domain | quota | measured | main sources |
+**English**
+
+| domain | quota | realised | main sources |
 |---|---:|---:|---|
-| mathematics | 25 % | 19.1 % | OpenWebMath, Wikipedia math |
-| science (physics, astronomy, cosmology) | 14 % | 11.1 % | arXiv, Wikipedia, curated cosmology articles, theoretical-physics categories |
-| code | 15 % | 7.5 % | CodeParrot Clean, CPython stdlib |
-| machine learning | 12 % | 5.4 % | arXiv cs.LG/CS.CL abstracts, Cosmopedia, framework docs |
-| literature | 11 % | 21.2 % | Project Gutenberg, Wikisource (1.1 GB Russian), FineWeb-2 |
-| logic | 10 % | 3.2 % | Wikipedia logic, Lean 4 mathlib proofs |
-| encyclopedic | 9 % | 30.3 % | Wikipedia EN/RU, full Russian Wikipedia import |
-| CS / software engineering / engineering | 3 % | 2.3 % | IETF RFCs, Wikipedia (microprocessors, VLSI, XP, agile) |
-| humour / satire | 1 % | <0.1 % | Project Gutenberg, Fandom transcripts |
-| self-identity | 1 % | 0.09 % | synthetic: 800 plain + 850 pastiche per language, no numeric facts |
+| mathematics | 26 % | 26.8 % | OpenWebMath, Wikipedia math |
+| encyclopedic | 16 % | 16.5 % | Wikipedia EN (3.4 GB of shards) |
+| literature | 15 % | 15.5 % | Project Gutenberg |
+| code | 11 % | 11.3 % | permissively licensed code corpora, SFT code slices |
+| CS / software engineering | 10 % | 10.3 % | Stack Overflow (207,646 answers), IETF RFCs |
+| science | 9 % | 9.3 % | arXiv, Wikipedia physics/astronomy |
+| machine learning | 7 % | 7.2 % | arXiv cs.LG/CL, Cosmopedia, framework docs |
+| logic | 4 % | 2.8 % ⚠ | Wikipedia logic, Lean 4 mathlib |
+| humour / identity | 2 % | 0.2 % ⚠ | Fandom, synthetic identity slice |
 
-The table is honest about the two hard domains: **logic and ML are short**.
-Logic text at scale barely exists outside formal-proof repositories, and ML
-prose is mostly behind publisher paywalls. The mixer reports both as
-shortfalls instead of padding them with mislabelled text.
+**Russian**
 
-## How sources were selected (the priority order)
+| domain | quota | realised | main sources |
+|---|---:|---:|---|
+| encyclopedic | 34 % | 35.5 % | Wikipedia RU |
+| CS / software engineering | 21 % | 21.9 % | Habr (49,116 posts), ru Stack Overflow (291,165 answers) |
+| literature | 15 % | 15.7 % | Wikisource, Gutenberg translations, FineWeb-2 |
+| mathematics | 13 % | 13.6 % | FineWeb-2 math, Wikipedia |
+| science | 10 % | 10.4 % | FineWeb-2 science, Wikipedia |
+| logic | 2 % | 2.1 % | Wikipedia logic, FineWeb-2 |
+| code | 3 % | 0.4 % ⚠ | Russian code tasks with translated questions |
+| ML / identity | 1.5 % | 0.3 % ⚠ | FineWeb-2, synthetic identity slice |
 
-1. **Verifiable provenance beats volume.** A source is admitted only if its
-   licence is stated and a URL can be recorded. Every shard carries
-   `source / licence / url / sha256` in `manifest.jsonl`; nothing is anonymous.
-2. **Primary sources over scrapes.** Wikipedia dumps, arXiv, Project Gutenberg,
-   OpenWebMath and official repositories come first; web text (FineWeb-2) is
-   used only where a domain has no primary source, and its shards are marked as
-   keyword-routed.
-3. **Science and mathematics first.** The quotas are not balanced for
-   "general English": a quarter of the corpus is mathematics, and physics,
-   astronomy and cosmology get an explicit slice of the science budget.
-4. **Quality filters before volume.** Minimum length, symbol ratio, repetition
-   ratio, script check per language, and a MinHash near-duplicate pass
-   (Jaccard 0.8) that removes translated mirrors and boilerplate.
-5. **Domain labels are declared as heuristics** where they are heuristics.
-   Wikipedia and FineWeb shards are routed by subject keywords, and the
-   manifest says so. Curated lists (cosmology, chips/XP) are explicit.
-6. **Leave room for the model's own name.** 1 % is reserved for a synthetic
-   self-identity slice; it is generated from a fixed fact sheet, not scraped.
+Structural shortfalls, reported rather than padded: `en/logic` 131 of 192 MB,
+`en/humour` 11 of 48, `en/identity` 1 of 48, `ru/code` 20 of 168, `ru/ml` 17 of
+56, `ru/humour` nothing, `ru/identity` 1 of 28. There is no more Russian code
+text on the Hub under a usable licence; more would have to be translated.
+
+## How documents are selected
+
+1. **Quality ranking inside each domain.** Every candidate gets a cheap score on
+   its first 4,000 characters (alphabetic density, digit ratio, vocabulary
+   diversity, word length, length bonus) and the quota takes the **best** ones,
+   not a random sample. This is the change that separates this corpus from
+   earlier builds, which took documents in SHA-256 order.
+2. **Exact dedupe.** sha256 of the whole text plus sha256 of its 2 KB prefix.
+   The MinHash/Jaccard pass it replaced cost 55 minutes and 20 GB of RAM.
+3. **Two-pass streaming build.** Pass 1 streams all 87 shards and keeps only
+   `(sha, lang, domain, bytes, path, offset)` plus the score — peak RSS ~1.1 GB
+   instead of the 25 GB that killed the in-memory builder. Pass 2 seeks to the
+   selected offsets and writes the mix.
+4. **Filters before scoring.** Minimum length, symbol ratio, repetition ratio and
+   a script check per language.
+5. **Provenance is mandatory.** A shard without a stated licence and a URL is
+   rejected by `record_shard`; `manifest.jsonl` is the attribution.
 
 ## Sources
 
 | source | licence | role |
 |---|---|---|
-| Wikipedia (HF dump 2023-11-01, EN/RU) | CC BY-SA | encyclopedic, domains via keywords |
+| Wikipedia (dump 2023-11-01, EN/RU) | CC BY-SA 3.0/4.0 | encyclopedic, domains via keywords |
 | OpenWebMath | ODC-By 1.0 | mathematics |
 | arXiv (abstracts + full text) | arXiv non-exclusive | science, ML |
-| Project Gutenberg (pglaf mirror) | public domain | literature, satire |
-| Wikisource | CC BY-SA | Russian literature |
-| CodeParrot Clean | permissive, per file | code |
+| Project Gutenberg, Wikisource | public domain / CC BY-SA | literature |
 | FineWeb-2 `rus_Cyrl` | ODC-By 1.0 | Russian domains without a primary source |
+| Stack Overflow (EN, CC BY-SA 4.0) | CC BY-SA 4.0 | CS / software engineering |
+| Habr, ru Stack Overflow | Habr content / Stack Exchange CC BY-SA 4.0 | Russian CS |
 | Lean 4 `mathlib4` | Apache-2.0 | formal proofs (logic) |
-| Cosmopedia v2 | Apache-2.0 | ML/science textbook-style prose |
-| Fandom wiki API | CC BY-SA 3.0 | easter-egg slice only |
+| Cosmopedia v2 | Apache-2.0 | ML/science textbook prose |
+| Code corpora (permissive) | per file, see the dataset pages | code |
+| Fandom wiki API | CC BY-SA 3.0 | humour slice only |
+
+## Decay-pass corpus (Q10A)
+
+A second bin is published next to the epoch one: **809,120,240 tokens** (29.1 %
+of an epoch, 249,868 documents) — the same domain profile selected by quality,
+plus **5 % chat** spread through the pass so the four chat tokens
+(`<|system|>`, `<|user|>`, `<|assistant|>`, `<|eot|>`) are not cold when SFT
+starts. Same held-out bin, so both stages are scored on the same blocks.
 
 ## Loading
 
-The tokenised bins (uint16, 4.4 GB) are distributed outside git — GitHub is not
-a data host.
-
 ```python
-# Kaggle (private dataset with the tokenised bins, uploaded after the build)
-#   kaggle datasets download -d icold21/kron-corpus-2b
 import numpy as np
-tokens = np.memmap("train.bpe.bin", dtype=np.uint16, mode="r")
 
-# Hugging Face (card, manifest, identity slice, easter eggs — no bins)
-#   from datasets import load_dataset
+# Kaggle: the tokenised bins (uint16) live there, GitHub is not a data host
+#   kaggle datasets download -d icold21/kron-corpus-2b        # epoch, v10
+#   kaggle datasets download -d icold21/kron-q10a-anneal-bin  # decay pass
+tokens = np.memmap("train.bpe.bin", dtype=np.uint16, mode="r")
+index = np.load("train_index.npy")     # (start, n, hash) per document
+
+# Hugging Face: card, manifest and the identity slice -- not the bins
 #   ds = load_dataset("Icold/kron-corpus")
 ```
-
-The raw, deduplicated text shards and the exact mix are reproducible from this
-repository: `scripts/` contains the fetchers, the mixer, the tokenizer training
-and the bin preparation. See `docs/composition.md` for measured numbers and
-`docs/rebuild.md` for the command sequence.
 
 ## Reproducing the build
 
 ```bash
-python scripts/build_bilingual.py fetch-hf --source all      # Wikipedia, arXiv, OpenWebMath, FineWeb-2
-python scripts/build_bilingual.py fetch-gutenberg-ids ...    # curated public-domain books
-python scripts/build_bilingual.py fetch-tarball ...          # Lean mathlib4
-python scripts/gen_identity.py --samples-per-language 800    # self-identity slice
-python scripts/build_bilingual.py build --budget-en-mb 4300 --budget-ru-mb 2870
-python scripts/prepare_bilingual_bin.py --vocab 8192
+# 1. fetch: append-only, sharded, one timeout per source
+python scripts/build_bilingual.py fetch-hf --source all
+python scripts/build_bilingual.py fetch-gutenberg-ids ...
+python scripts/build_bilingual.py fetch-wikibooks ...
+python scripts/gen_identity.py --samples-per-language 800
+
+# 2. mix: quality-ranked quotas, per language (two passes, ~1 GB RSS)
+python scripts/build_streaming.py --budget-en-mb 4800 --budget-ru-mb 5600
+
+# 3. bins: reuse the tokenizer and the held-out bin so bpb stays comparable
+python scripts/prepare_bilingual_bin.py --out-dir bins \
+    --reuse-tokenizer data/bilingual/tokenizer.json \
+    --reuse-val-dir held_out --phase epoch --no-domain-prompts
 ```
 
-Fetches are append-only and sharded; `build` is deterministic given the same
-shards (dedup walks documents in SHA-256 order).
+The decay pass adds the chat pools (`scripts/build_anneal_chat.py` in the code
+repository), the same mix build at 30 % of the budget, and
+`--phase anneal --interleave chat`.
+
+## Version history
+
+| version | what changed |
+|---|---|
+| v10 (current) | prose rebalance: EN literature 15 %, EN encyclopedic 16 %, RU technical up, SFT samples, quality-ranked quotas, 2.78B tokens |
+| v1-v9 | earlier rebuilds of the same pipeline. The held-out bin stayed byte-identical from v3 onward; versions 4-7 carried inserted domain system prompts, which v8 removed — the trainer must never spend gradient on its own boilerplate |
 
 ## Licence
 
 The corpus is a **collection**: each shard keeps the licence of its source, as
-recorded in `manifest.jsonl`. CC BY-SA text (Wikipedia, Wikisource, Fandom)
-requires attribution and share-alike; Gutenberg texts are public domain in the
-US; OpenWebMath, FineWeb-2 and peS2o are ODC-By 1.0; mathlib4 is Apache-2.0.
-The build scripts themselves are MIT, like KronLLM.
+recorded in `manifest.jsonl`. CC BY-SA text requires attribution and share-alike;
+Gutenberg texts are public domain in the US; OpenWebMath and FineWeb-2 are
+ODC-By 1.0; mathlib4 is Apache-2.0. The build scripts are MIT, like KronLLM.
 
 If you redistribute a mix, keep `manifest.jsonl` next to it — that file is the
 attribution.
 
 ---
 
-<sub>Two slices in `data/easter_eggs/` and `data/identity/` are easter eggs: a
-synthetic self-identity set where the model calls itself *Kron* (800 plain +
-850 pastiche per language), and 2 MB of animated sci-fi dialogue (81 episode
-transcripts plus 11 season-9 plot summaries). Both are under 0.1 % of the corpus and marked in the
-manifest.</sub>
+<sub>The `identity` slices are synthetic: the model calls itself *Kron* from a
+fixed fact sheet (no numeric facts), 800 plain + 850 pastiche documents per
+language, under 0.1 % of the corpus and marked in the manifest.</sub>

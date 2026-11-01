@@ -307,6 +307,27 @@ def _bands(sig: Sequence[int], bands: int) -> Iterator[tuple]:
         yield (i, tuple(sig[i:i + step]))
 
 
+def sweep_stale_mix(mix: Path) -> list[str]:
+    """Delete the previous build's shards from ``mix/``, but keep the chat pools.
+
+    ``en_chat``/``ru_chat`` are built by ``scripts/build_anneal_chat.py`` and
+    consumed by ``prepare_bilingual_bin.py --interleave chat``; they sit in the
+    same directory as the domain shards, so a blanket ``*.jsonl.gz`` sweep
+    silently drops the decay pass's chat slice (it did, twice).  ``Path.stem``
+    strips only the last suffix -- ``en_chat.jsonl.gz`` -> ``en_chat.jsonl`` --
+    which is why a ``stem.endswith("_chat")`` guard never fired.
+    """
+    mix = Path(mix)
+    mix.mkdir(parents=True, exist_ok=True)
+    removed = []
+    for stale in mix.glob("*.jsonl.gz"):
+        if "_chat." in stale.name:
+            continue
+        stale.unlink()
+        removed.append(stale.name)
+    return removed
+
+
 def dedup(docs: Iterable[dict], threshold: float = 0.8,
           text_key: str = "text") -> tuple[list[dict], int]:
     """Remove exact and near duplicates.
@@ -333,7 +354,13 @@ def dedup(docs: Iterable[dict], threshold: float = 0.8,
         if h in seen_exact:
             dropped += 1
             continue
-        sig = minhash(text)
+        # Fingerprint only the opening of a document: shingling all 2 GB of
+        # corpus text in Python took 55 minutes and 20 GB of RAM on the
+        # 2026-11-01 rebuild, almost all of it inside five thousand Gutenberg
+        # books of half a megabyte each.  Two documents that share their first
+        # 8 KB are duplicates for our purposes, and near-duplicates that differ
+        # only later are rare enough to keep.
+        sig = minhash(text[:8000])
         is_dup = False
         for band in _bands(sig, 16):
             bucket = buckets.setdefault(band, [])
@@ -433,23 +460,66 @@ def record_shard(path: Path, manifest: Path, source: str, licence: str,
 # ---------------------------------------------------------------------------
 
 DOMAIN_QUOTAS = {
-    "math": 0.25,
-    "science": 0.14,
+    # Rebalanced 2026-11-01: the English side was 79 % technical (math, ml,
+    # code, science, cs, logic) and 20 % prose, which made English bpb 1.43
+    # against 0.93 for Russian -- the model was bad at English *prose*, not at
+    # English.  Prose is now 36 % and the technical block 62 %, with math kept
+    # at 20 % because the project cares about it.
+    "math": 0.20,
+    "science": 0.12,
     "code": 0.15,
-    "logic": 0.10,
-    "literature": 0.11,
-    "encyclopedic": 0.09,
+    "logic": 0.07,
+    "literature": 0.15,
+    "encyclopedic": 0.18,
     # Computer science, software engineering and engineering prose.  A small
     # slice: the code domain already teaches the syntax, this teaches the
     # discourse around it.
     "cs": 0.03,
-    "ml": 0.12,
+    "ml": 0.08,
     # Humour, satire and jokes: short texts that teach tone rather than facts.
     "humour": 0.01,
     # Self-identity: synthetic first-person texts that teach the model its own
     # name.  The quota is an upper bound; the slice is sample-limited, so the
     # mixer reports it as a shortfall rather than duplicating text.
     "identity": 0.01,
+}
+
+#: Per-language quotas, 2026-11-01.  One shared table cannot hold 60/40 in
+#: tokens: Russian has almost no technical supply (code 0 MB, ml 18 MB, cs
+#: 35 MB), so under the shared table it stopped at two thirds of its budget and
+#: the whole corpus came out smaller and *more* English than before.  Russian
+#: gets a prose profile, English keeps a technical one, and both fill their
+#: byte budget derived from the 60/40 token split.
+QUOTAS_EN = {
+    # 2026-11-01, third pass: prose up (literature 9 -> 15, encyclopedics
+    # 14 -> 16 -- the two balanced, with encyclopedics slightly ahead), cs left
+    # alone at 10 %.  Paid for by math 28 -> 26 (still all the supply there is),
+    # science 11 -> 9, code 13 -> 11, ml 8 -> 7, logic 5 -> 4.
+    "math": 0.26,
+    "science": 0.09,
+    "code": 0.11,
+    "logic": 0.04,
+    "literature": 0.15,
+    "encyclopedic": 0.16,
+    "cs": 0.10,
+    "ml": 0.07,
+    "humour": 0.01,
+    "identity": 0.01,
+}
+
+QUOTAS_RU = {
+    # math/science/cs up; literature 26 -> 15 and encyclopedics 38 -> 34 pay for
+    # it, and the freed space goes to the Russian Stack Overflow dump.
+    "encyclopedic": 0.34,
+    "literature": 0.15,
+    "math": 0.13,
+    "science": 0.10,
+    "cs": 0.21,
+    "code": 0.03,
+    "logic": 0.02,
+    "ml": 0.01,
+    "humour": 0.005,
+    "identity": 0.005,
 }
 
 
@@ -514,7 +584,8 @@ def write_heldout(docs: Iterable[dict], out_dir: Path, per_language_bytes: int,
 def quota_mix(docs: Sequence[dict], budget_per_language: int,
               quotas: Optional[dict[str, float]] = None,
               heldout_bytes: int = 0,
-              budgets: Optional[dict[str, int]] = None) -> dict:
+              budgets: Optional[dict[str, int]] = None,
+              min_heldout_bucket: int = 5_000_000) -> dict:
     """Split a held-out slice and apply the domain quotas.
 
     Fetching is deliberately generous and uneven; this is where the plan is
@@ -551,7 +622,7 @@ def quota_mix(docs: Sequence[dict], budget_per_language: int,
         # A bucket smaller than 5 MB is a deliberate small slice (identity,
         # rare domains).  Holding out a share of it would remove it from
         # training entirely, which is the opposite of the intent.
-        budget = per_bucket if bucket_bytes >= 5_000_000 else 0
+        budget = per_bucket if bucket_bytes >= min_heldout_bucket else 0
         taken = 0
         n = 0
         while n < len(items) and taken < budget:
